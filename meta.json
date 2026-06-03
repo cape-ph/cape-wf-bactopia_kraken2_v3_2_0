@@ -1,0 +1,4 @@
+{
+    "dag_id": "bactopia_and_kraken2_v3_2_0_deploy_test",
+    "pipeline_ids": ["bactopia-ont-v3.2.0", "bactopia-kraken2-v3.2.0"]
+}
