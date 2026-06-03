@@ -7,10 +7,10 @@ readme = "README.md"
 package-mode = false
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.14"
+python = ">=3.10,<3.13"
 # Dependencies for CI type checking only - not distributed
 boto3 = "*"
-apache-airflow = { version = "^3.1.0", extras = ["amazon"] }
+apache-airflow = { version = "3.0.6", extras = ["amazon"] }
 # TODO: Add capepy when needed for imports
 
 [build-system]
