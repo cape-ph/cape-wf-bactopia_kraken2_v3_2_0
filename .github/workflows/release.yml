@@ -50,13 +50,15 @@ jobs:
             TAG="${{ inputs.tag }}"
             echo "tag_name=$TAG" >> $GITHUB_OUTPUT
             echo "mode=manual" >> $GITHUB_OUTPUT
+            echo "Manual mode: targeting release $TAG"
           else
             # Automated: find release for current commit
             CURRENT_SHA="${{ github.sha }}"
+            echo "Looking for release targeting commit $CURRENT_SHA"
             
-            # Get all releases and find one matching current commit
+            # Get all releases and find one matching current commit SHA
             RELEASE_INFO=$(gh api repos/${{ github.repository }}/releases \
-              --jq ".[] | select(.target_commitish == \"$CURRENT_SHA\" or .tag_name as \$tag | \"refs/tags/\($tag)\" == \"${{ github.ref }}\") | {tag_name, created_at} | @json" \
+              --jq ".[] | select(.target_commitish == \"$CURRENT_SHA\") | {tag_name, created_at} | @json" \
               | head -1)
             
             if [ -n "$RELEASE_INFO" ]; then
@@ -68,15 +70,18 @@ jobs:
               CURRENT_TIMESTAMP=$(date +%s)
               TIME_DIFF=$((CURRENT_TIMESTAMP - CREATED_TIMESTAMP))
               
+              echo "Found release $TAG (created ${TIME_DIFF}s ago)"
+              
               if [ $TIME_DIFF -lt 300 ]; then
                 echo "tag_name=$TAG" >> $GITHUB_OUTPUT
                 echo "mode=automated" >> $GITHUB_OUTPUT
+                echo "✅ Release is recent enough, will attach artifacts"
               else
-                echo "No recent release found for this commit"
+                echo "⏰ Release is too old (${TIME_DIFF}s > 300s), skipping"
                 exit 0
               fi
             else
-              echo "No release found for this commit"
+              echo "❌ No release found for commit $CURRENT_SHA"
               exit 0
             fi
           fi
