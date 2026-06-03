@@ -1,0 +1,5 @@
+{
+    "autoImportCompletions": true,
+    "typeCheckingMode": "basic",
+    "reportMissingTypeStubs": false
+}

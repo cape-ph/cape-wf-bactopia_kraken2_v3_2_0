@@ -1,0 +1,8 @@
+[tools]
+opencode = "1"
+python = "3.10"
+poetry = "1.8"
+pre-commit = "3"
+
+[env]
+_.python.venv = ".venv"

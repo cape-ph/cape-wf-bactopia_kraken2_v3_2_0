@@ -1,0 +1,72 @@
+name: Semantic Versioning Release
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    types: [opened, edited, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    uses: cape-ph/.github/.github/workflows/semantic_release.yml@main
+    secrets: inherit
+    with:
+      is_production: ${{ github.event_name == 'push' }}
+      release-type: python
+      
+  attach-artifacts:
+    name: Attach Release Assets
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          
+      - name: Check if release was just created
+        id: check_release
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          # Get the commit time of the latest tag (if exists)
+          if [ -n "$LATEST_TAG" ]; then
+            TAG_TIME=$(git log -1 --format=%ct $LATEST_TAG)
+            CURRENT_TIME=$(date +%s)
+            TIME_DIFF=$((CURRENT_TIME - TAG_TIME))
+            
+            # If tag was created within last 60 seconds, this is a new release
+            if [ $TIME_DIFF -lt 60 ]; then
+              echo "release_created=true" >> $GITHUB_OUTPUT
+              echo "tag_name=$LATEST_TAG" >> $GITHUB_OUTPUT
+            else
+              echo "release_created=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "release_created=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Get repository name
+        if: steps.check_release.outputs.release_created == 'true'
+        id: repo
+        run: echo "name=${GITHUB_REPOSITORY#*/}" >> $GITHUB_OUTPUT
+        
+      - name: Create workflow archive
+        if: steps.check_release.outputs.release_created == 'true'
+        run: |
+          zip -j "${{ steps.repo.outputs.name }}-${{ steps.check_release.outputs.tag_name }}.zip" \
+            bactopia_kraken2_v3_2_0.py \
+            meta.json
+            
+      - name: Upload to release
+        if: steps.check_release.outputs.release_created == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ steps.check_release.outputs.tag_name }} \
+            "${{ steps.repo.outputs.name }}-${{ steps.check_release.outputs.tag_name }}.zip"
