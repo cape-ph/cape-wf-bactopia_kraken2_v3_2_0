@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.1](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.1.0...v0.1.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* correct JQ syntax error in release artifact detection ([b617d22](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/b617d22cc6234d281bf2288a76a80f093382d463))
+* correct JQ syntax error in release artifact detection ([ca44574](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/ca445743dc01b90d6be89c795a4729f449e6a2c9))
+* Merge pull request [#3](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/issues/3) from cape-ph/fix-release-asset-naming-again ([b617d22](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/b617d22cc6234d281bf2288a76a80f093382d463))
+
 ## 0.1.0 (2026-06-03)
 
 
