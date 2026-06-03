@@ -77,6 +77,11 @@ pyright bactopia_kraken2_v3_2_0.py
 typos
 ```
 
+## Documentation
+
+- [AGENTS.md](AGENTS.md) - Development setup and CI/CD information
+- [OPERATIONS.md](OPERATIONS.md) - Release management and troubleshooting
+
 ## Release Process
 
 Releases are automated via semantic versioning:

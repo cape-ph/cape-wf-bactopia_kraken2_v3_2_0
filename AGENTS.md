@@ -70,20 +70,7 @@ Automated via release-please:
    - `bactopia_kraken2_v3_2_0.py`
    - `meta.json`
 
-## Commit message examples
-
-```bash
-# Patch release (v1.2.3 → v1.2.4)
-git commit -m "fix: correct kraken2 output path handling"
-
-# Minor release (v1.2.3 → v1.3.0)
-git commit -m "feat: add support for custom kraken2 database paths"
-
-# Major release (v1.2.3 → v2.0.0)
-git commit -m "feat!: migrate to Airflow 3.1 taskflow API
-
-BREAKING CHANGE: requires Airflow 3.1+ and new parameter structure"
-```
+**See [OPERATIONS.md](OPERATIONS.md) for detailed release procedures and troubleshooting.**
 
 ## Workflow conventions
 
