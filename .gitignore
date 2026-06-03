@@ -27,7 +27,10 @@ htmlcov/
 *~
 
 # Poetry
-poetry.lock
+#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
+#   This is especially recommended for the root package of a project. If your package is a library
+#   that other projects depend on, you might want to not include the lock file.
+# poetry.lock
 
 # Build artifacts
 dist/
