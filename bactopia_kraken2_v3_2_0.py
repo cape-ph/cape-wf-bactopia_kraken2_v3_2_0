@@ -63,11 +63,11 @@ JOB_QUEUE_NAME = "ccd-pvsl-analysis-btch-jobq-0a107a5"
 #       something like:
 # {
 #   "expected_dap_name": {
-#       "expected_parm1": value,
+#       "expected_param1": value,
 #       ...
 #    },
 #   "another_expected_dap_name": {
-#       "expected_parm1": value,
+#       "expected_param1": value,
 #       ...
 #    }
 # }
@@ -77,7 +77,7 @@ JOB_QUEUE_NAME = "ccd-pvsl-analysis-btch-jobq-0a107a5"
 # other than DAPs (e.g. if we wanted to allow them to set the name for a
 # report generated from a task) we'd need a mechanism to tell the FE about that
 # schema as well. It may be worth considering a workflow param schema that ties
-# the room together since we need some way of telling the front end "whn you
+# the room together since we need some way of telling the front end "when you
 # asked for a bactopia with kraken workflow, that resulted in the need for the
 # following parameters". Also need to figure out how this plays with versioning
 # of DAPs. wouldn't necessarily want to have a workflow for every combination of
@@ -98,7 +98,7 @@ JOB_QUEUE_NAME = "ccd-pvsl-analysis-btch-jobq-0a107a5"
     # this DAG must be triggered, it is not on a schedule
     schedule="@once",
     start_date=datetime.now(),
-    # if another run of this is already scheduled, do not supercede. If this was
+    # if another run of this is already scheduled, do not supersede. If this was
     # True the latest run would be the one run
     catchup=False,
 )
@@ -171,7 +171,10 @@ def bactopia_and_kraken2_v3_2_0():
     # TODO: add report generation here
 
     chain(
-        submit_bactopia_job, create_k2_include, wait_for_k2_include, submit_kraken2_job
+        submit_bactopia_job,
+        create_k2_include,
+        wait_for_k2_include,
+        submit_kraken2_job,
     )
 
 
