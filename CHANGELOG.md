@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.1.1...v0.1.2) (2026-06-03)
+
+
+### Bug Fixes
+
+* added in missing meta.json content ([c05ec54](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/c05ec54b24d43dfa814b228370ea01dc282531f2))
+* added in missing meta.json content ([e284b80](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/e284b8050fd4a66ebbe92be98086f1c5e59c737c))
+
 ## [0.1.1](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.1.0...v0.1.1) (2026-06-03)
 
 
