@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.1.2...v0.1.3) (2026-06-04)
+
+
+### Bug Fixes
+
+* incorrect dag id in metadata causing system issued down the line. ([7d3df10](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/7d3df10df2df53ac7237dd35df5ca42656495ce3))
+* incorrect dag id in metadata causing system issued down the line. ([0f68b57](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/0f68b57406209eb3c5ea4679b7cabfcac3687231))
+
 ## [0.1.2](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.1.1...v0.1.2) (2026-06-03)
 
 
