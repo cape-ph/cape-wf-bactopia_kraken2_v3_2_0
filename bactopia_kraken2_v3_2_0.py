@@ -383,7 +383,7 @@ def bactopia_and_kraken2_v3_2_0():
     #   an api endpoint that returns it for immediate download. may want to
     #   consider doing that differently or augmenting what we currently do,
     #   because...
-    # - if we generate here (or anywhere prior to a user hitting an endoint to
+    # - if we generate here (or anywhere prior to a user hitting an endpoint to
     #   download) we will need a place to store the report (s3). this brings a
     #   whole lot of authz stuff to the equation. and right now we aren't
     #   passing the authn headers anywhere, so we don't know who we're writing
