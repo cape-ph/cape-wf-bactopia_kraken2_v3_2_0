@@ -1,40 +1,58 @@
-# adapted from out submit_dap_run endpoint and the airflow example for batch
-# https://github.com/apache/airflow/blob/providers-amazon/9.25.0/providers/amazon/tests/system/amazon/aws/example_batch.py
-#
-# This has not been tested in any way as of 2026.04.27. We need to get our job
-# def back to working, but this is a start of what could become the bactopia and
-# kraken2 workflow. This is using what airflow refers to as taskflow.
-#
-# Assumes:
-# * we have the aws airflow provider installed
-# * we have created the batch environment and job queue already
-# * we're using airflow 3.1+
+"""
+CAPE Workflow: Bactopia v3.2.0 + Kraken2 Taxonomic Classification.
 
-# TODO:
-# - trace all the imports and constants to make sure they're needed. much of
-#   this was from the example and may be removable now
+This Airflow DAG implements a two-stage bacterial genome analysis workflow:
+1. Bactopia v3.2.0 - Genome assembly, QC, and annotation
+2. Kraken2 (via Bactopia tools) - Taxonomic classification
 
-import io
+Both pipelines run as Nextflow workflows in AWS Batch.
+
+Architecture:
+    - Validation task validates pipeline configs and converts to CLI strings
+    - Bactopia BatchOperator runs genome assembly pipeline
+    - S3 operators create and wait for kraken2 include file
+    - Kraken2 BatchOperator runs taxonomic classification on assembled genomes
+
+Configuration:
+    Triggered via Airflow API with dag_run.conf structure:
+    {
+        "pipelineConfigs": [
+            {
+                "pipelineId": "bactopia-ont-v3.2.0" | "bactopia-illumina-v3.2.0",
+                "nextflowOptions": {
+                    "--sample": "sample-name",
+                    "--outdir": "s3://bucket/path",
+                    ...
+                }
+            },
+            {
+                "pipelineId": "bactopia-kraken2-v3.2.0",
+                "nextflowOptions": {
+                    "--wf": "kraken2",
+                    "--bactopia": "s3://bucket/path",
+                    "--kraken2_db": "/mnt/nextflow_shared_data/kraken2",
+                    ...
+                }
+            }
+        ]
+    }
+
+Requirements:
+    - Airflow 3.0.6 with Amazon provider
+    - AWS Batch environment with workflow and analysis queues
+    - S3 buckets for input/output
+    - Kraken2 database mounted at /mnt/nextflow_shared_data/kraken2
+
+See meta.json for supported pipeline IDs and README.md for detailed usage.
+"""
+
 import logging
 from datetime import datetime
 
-import boto3
-from airflow.providers.amazon.aws.operators.batch import (
-    BatchCreateComputeEnvironmentOperator,
-    BatchOperator,
-)
-from airflow.providers.amazon.aws.operators.ecs import (
-    EcsDeregisterTaskDefinitionOperator,
-)
+from airflow.providers.amazon.aws.operators.batch import BatchOperator
 from airflow.providers.amazon.aws.operators.s3 import S3CreateObjectOperator
-from airflow.providers.amazon.aws.sensors.batch import (
-    BatchComputeEnvironmentSensor,
-    BatchJobQueueSensor,
-    BatchSensor,
-)
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from airflow.sdk import chain, dag, task
-from airflow.utils.trigger_rule import TriggerRule
 
 log = logging.getLogger(__name__)
 
@@ -56,53 +74,252 @@ WORKFLOW_QUEUE_NAME = "ccd-pvsl-workflows-btch-jobq-e326d2f"
 NEXTFLOW_JOB_DEFINITION = "ccd-pvsl-nextflow-jobdef"
 JOB_QUEUE_NAME = "ccd-pvsl-analysis-btch-jobq-0a107a5"
 
+# NOTE: This is setting up for future. Right now this DAG only supports
+#       bactopia 3.2.0 and kraken through bactopia 3.2.0. The ids for those
+#       pipelines are in this dict. Additionally we have a notion of required
+#       parameters in here as well.
+# TODO: The required parameters should instead come from our
+#       `/workflows/pipelineprofiles` endpoint, which gives the schema for a
+#       profile. This endpoint also gives the pipelineId, project and version
+#       for each DAP configured for the workflow. using some combo of these
+#       things along with the below constant, we should be able to get rid of
+#       BACTOPIA_PROJ, BACTOPIA_VERSION, KRAKEN2_PROJ, and KRAKEN2_VERSION
+#       constants. this will be done in issue #10.
+EXPECTED_PIPELINES = {
+    "bactopia": {
+        "pipeline_ids": ["bactopia-ont-v3.2.0"],
+        "required_fields": ["--sample", "--outdir"],
+    },
+    "kraken2": {
+        "pipeline_ids": ["bactopia-kraken2-v3.2.0"],
+        "required_fields": [],
+    },
+}
 
-# TODO: need to figure out how we'll be structuring the config dict for tasks.
-#       it's going to the json body of the post we send from the API the front
-#       end hits, and will be specific to a workflow. We'll probably want
-#       something like:
+K2_INCLUDE_PREFIX = "batch_job_scratch/kraken2/"
+K2_INCLUDE_SUFFIX = "-k2-include.txt"
+
+
+# Configuration format is now an object with pipelineConfigs passed via dag_run.conf:
+#
+# Example config:
 # {
-#   "expected_dap_name": {
-#       "expected_param1": value,
-#       ...
-#    },
-#   "another_expected_dap_name": {
-#       "expected_param1": value,
-#       ...
-#    }
+#   "pipelineConfigs": [
+#     {
+#       "pipelineId": "bactopia-ont-v3.2.0",
+#       "nextflowOptions": {
+#         "--sample": "sample-001",
+#         "--outdir": "s3://my-bucket/bactopia-output",
+#         "--min_genome_size": "2000000"
+#       }
+#     },
+#     {
+#       "pipelineId": "bactopia-kraken2-v3.2.0",
+#       "nextflowOptions": {
+#         "--some-option": "value"
+#       }
+#     }
+#   ]
 # }
 #
-# The front end will be grabbing values from the user based on json schema
-# sent from the back end. So if we need params from the frontend for things
-# other than DAPs (e.g. if we wanted to allow them to set the name for a
-# report generated from a task) we'd need a mechanism to tell the FE about that
-# schema as well. It may be worth considering a workflow param schema that ties
-# the room together since we need some way of telling the front end "when you
-# asked for a bactopia with kraken workflow, that resulted in the need for the
-# following parameters". Also need to figure out how this plays with versioning
-# of DAPs. wouldn't necessarily want to have a workflow for every combination of
-# versions of all DAPs
-# Maybe we need to add a pipeline-id to the profile. project name is no bueno
-# cause its the same for bactopia and kraken. pipeline name is not great either
-# cause it's for people but feels like there should be something for both
-# "Bactopia ONT Sample" pipelines that we can use to key config on in the tasks
-# here. Versioning may play a role too, but if one workflow starts getting used
-# for a ton of versions and the versions start having divergent config, then the
-# workflow becomes hard to maintain
+# The validate_and_extract_nextflow_configs task handles:
+# - Validation that expected pipelineIds are present
+# - Validation that required fields exist in nextflowOptions
+# - Conversion of nextflowOptions dict to CLI string
+# - Making configs available to downstream tasks via XCom
+#
+# See EXPECTED_PIPELINES constant for supported pipelineIds and required fields.
+
+
+# NOTE: functions and tasks outside the DAG are intended to eventually be in a
+#       reusable library as they can be used by many DAGs
+
+
+def nextflow_options_to_cli_string(options_dict: dict) -> str:
+    """
+    Convert nextflow options dict to CLI string.
+
+    Args:
+        options_dict: Dictionary of nextflow options, e.g.:
+                     {"--sample": "s001", "--outdir": "s3://bucket/path"}
+
+    Returns:
+        CLI string with options in dict insertion order, e.g.:
+        "--sample s001 --outdir s3://bucket/path"
+    """
+    parts = []
+    for key, value in options_dict.items():
+        parts.append(f"{key} {value}")
+    return " ".join(parts)
+
+
+def extract_s3_bucket_name(s3_path: str) -> str:
+    """
+    Extract bucket name from S3 path (lenient validation).
+
+    Args:
+        s3_path: S3 URL like "s3://bucket-name/prefix/path" or "s3://bucket-name"
+
+    Returns:
+        Bucket name extracted from the path, e.g., "bucket-name"
+
+    Raises:
+        ValueError: If path doesn't contain "s3://" or has no bucket name
+
+    Examples:
+        "s3://my-bucket/path/to/data" -> "my-bucket"
+        "s3://bucket-name" -> "bucket-name"
+
+    TODO: Eventually want bucket name in config directly,
+    but need to handle non-nextflow pipelines first.
+    """
+    if "s3://" not in s3_path:
+        raise ValueError(f"Invalid S3 path (missing s3://): {s3_path}")
+
+    path_without_scheme = s3_path.split("s3://", 1)[1]
+
+    if not path_without_scheme:
+        raise ValueError(f"Invalid S3 path (no bucket name): {s3_path}")
+
+    bucket_name = path_without_scheme.split("/")[0]
+
+    if not bucket_name:
+        raise ValueError(f"Invalid S3 path (empty bucket name): {s3_path}")
+
+    return bucket_name
+
+
+# TODO: in order for this to be reusable, we'll need to pass in whatever form
+#       `EXPECTED_PIPELINES` takes on. right now it assumes it's in scope and
+#       just uses it.
+@task
+def validate_and_extract_nextflow_configs(
+    fail_on_any_error: bool = True, **context
+) -> dict:
+    """
+    Validates pipeline configs from dag_run.conf and extracts/transforms them.
+
+    This task ensures all expected pipelines are present with valid configuration,
+    and converts nextflowOptions to CLI strings for use in BatchOperators.
+
+    Args:
+        fail_on_any_error: If True, fail if any expected pipeline is
+                          missing/invalid (default: True). Added for future
+                          library reusability.
+        context: Airflow context (automatically passed by TaskFlow API).
+                 Config is accessed from context['dag_run'].conf with structure:
+                 {
+                     "pipelineConfigs": [
+                         {
+                             "pipelineId": str (must match one from EXPECTED_PIPELINES),
+                             "nextflowOptions": dict (must contain required_fields)
+                         },
+                         ...
+                     ]
+                 }
+
+    Returns:
+        Dict with keys from EXPECTED_PIPELINES, each containing:
+        {
+            "bactopia": {
+                "pipelineId": "bactopia-ont-v3.2.0",
+                "nextflowOptions": {"--sample": "s001", "--outdir": "s3://..."},
+                "nextflowOptionsCli": "--sample s001 --outdir s3://..."
+            },
+            "kraken2": {
+                "pipelineId": "bactopia-kraken2-v3.2.0",
+                "nextflowOptions": {...},
+                "nextflowOptionsCli": "..."
+            }
+        }
+
+    Raises:
+        ValueError: If expected pipelineId not found or required fields missing
+                   (when fail_on_any_error is True). Error messages:
+                   - Missing config: "No config found for pipeline 'X'. Expected
+                     one of: [list]. Received pipelineIds: [actual]"
+                   - Missing field: "Missing required field '--sample' for
+                     pipeline 'bactopia'. Required fields: [list]"
+
+    TODO: Investigate XCom size limits for large nextflowOptions configs.
+    """
+    result = {}
+
+    conf = context["dag_run"].conf
+
+    if conf is None:
+        raise ValueError(
+            "No configuration provided. DAG must be triggered with 'conf' parameter."
+        )
+
+    if "pipelineConfigs" not in conf:
+        raise ValueError(
+            "Invalid config structure: missing 'pipelineConfigs' key. "
+            "Expected config format: {'pipelineConfigs': [...]}"
+        )
+
+    pipeline_configs = conf["pipelineConfigs"]
+    received_pipeline_ids = [
+        item.get("pipelineId") for item in pipeline_configs
+    ]
+
+    for pipeline_key, pipeline_spec in EXPECTED_PIPELINES.items():
+        expected_ids = pipeline_spec["pipeline_ids"]
+        required_fields = pipeline_spec["required_fields"]
+
+        matching_config = None
+        for item in pipeline_configs:
+            if item.get("pipelineId") in expected_ids:
+                matching_config = item
+                break
+
+        if matching_config is None:
+            error_msg = (
+                f"No config found for pipeline '{pipeline_key}'. "
+                f"Expected one of: {expected_ids}. "
+                f"Received pipelineIds: {received_pipeline_ids}"
+            )
+            if fail_on_any_error:
+                raise ValueError(error_msg)
+            else:
+                log.warning(error_msg)
+                continue
+
+        nextflow_options = matching_config.get("nextflowOptions", {})
+        for field in required_fields:
+            if field not in nextflow_options:
+                error_msg = (
+                    f"Missing required field '{field}' for pipeline '{pipeline_key}'. "
+                    f"Required fields: {required_fields}"
+                )
+                if fail_on_any_error:
+                    raise ValueError(error_msg)
+                else:
+                    log.warning(error_msg)
+
+        nextflow_cli = nextflow_options_to_cli_string(nextflow_options)
+
+        result[pipeline_key] = {
+            "pipelineId": matching_config["pipelineId"],
+            "nextflowOptions": nextflow_options,
+            "nextflowOptionsCli": nextflow_cli,
+        }
+
+    return result
 
 
 @dag(
     dag_id=DAG_ID,
     dag_display_name=DAG_DISPLAY_NAME,
     description=DAG_DESCRIPTION,
-    # this DAG must be triggered, it is not on a schedule
     schedule="@once",
     start_date=datetime.now(),
-    # if another run of this is already scheduled, do not supersede. If this was
-    # True the latest run would be the one run
     catchup=False,
+    user_defined_filters={"extract_s3_bucket": extract_s3_bucket_name},
 )
 def bactopia_and_kraken2_v3_2_0():
+
+    configs = validate_and_extract_nextflow_configs()
 
     submit_bactopia_job = BatchOperator(
         task_id="submit_bactopia_batch_job",
@@ -116,11 +333,7 @@ def bactopia_and_kraken2_v3_2_0():
                 {"name": "PIPELINE_QUEUE", "value": f"{JOB_QUEUE_NAME}"},
                 {
                     "name": "NF_OPTS",
-                    "value": (
-                        "--outdir  {{ params.bactopia.pipelineOutputBucket }}/{{ params.bactopia.pipelineOutputPrefix }} "
-                        "--sample {{ params.bactopia['--sample'] }} "
-                        "{{ params.bactopia.nextflowOptions }}"
-                    ),
+                    "value": "{{ ti.xcom_pull(task_ids='validate_and_extract_nextflow_configs')['bactopia']['nextflowOptionsCli'] }}",
                 },
             ]
         },
@@ -128,16 +341,16 @@ def bactopia_and_kraken2_v3_2_0():
 
     create_k2_include = S3CreateObjectOperator(
         task_id="create_k2_include",
-        s3_bucket="{{ params.kraken2.pipelineOutputBucketName }}",
-        s3_key="batch_job_scratch/kraken2/{{ dag_run.dag_id }}-k2-include.txt",
-        data="{{ params.bactopia['--sample'] }}",
+        s3_bucket="{{ ti.xcom_pull(task_ids='validate_and_extract_nextflow_configs')['bactopia']['nextflowOptions']['--outdir'] | extract_s3_bucket }}",
+        s3_key=f"{K2_INCLUDE_PREFIX}{{{{ dag_run.dag_id }}}}{K2_INCLUDE_SUFFIX}",
+        data="{{ ti.xcom_pull(task_ids='validate_and_extract_nextflow_configs')['bactopia']['nextflowOptions']['--sample'] }}",
         replace=True,
     )
 
     wait_for_k2_include = S3KeySensor(
         task_id="wait_for_kraken_2_include_file",
-        bucket_name="{{ params.kraken2.pipelineOutputBucketName }}",
-        bucket_key="batch_job_scratch/kraken2/{{ dag_run.dag_id }}-k2-include.txt",
+        bucket_name="{{ ti.xcom_pull(task_ids='validate_and_extract_nextflow_configs')['bactopia']['nextflowOptions']['--outdir'] | extract_s3_bucket }}",
+        bucket_key=f"{K2_INCLUDE_PREFIX}{{{{ dag_run.dag_id }}}}{K2_INCLUDE_SUFFIX}",
     )
 
     wait_for_k2_include.poke_interval = 10
@@ -155,12 +368,9 @@ def bactopia_and_kraken2_v3_2_0():
                 {
                     "name": "NF_OPTS",
                     "value": (
-                        "--bactopia {{ params.bactopia.pipelineOutputBucket }}/"
-                        "{{ params.bactopia.pipelineOutputPrefix }} "
                         f"--aws_queue {JOB_QUEUE_NAME} "
-                        "--wf kraken2 {{ params.kraken2.nextflowOptions }} "
-                        "--include {{ params.bactopia.pipelineOutputBucket }}/batch_job_scratch/kraken2/{{ dag_run.dag_id }}-k2-include.txt "
-                        "--kraken2_db /mnt/nextflow_shared_data/kraken2 "
+                        "{{ ti.xcom_pull(task_ids='validate_and_extract_nextflow_configs')['kraken2']['nextflowOptionsCli'] }} "
+                        f"--include s3://{{{{ ti.xcom_pull(task_ids='validate_and_extract_nextflow_configs')['bactopia']['nextflowOptions']['--outdir'] | extract_s3_bucket }}}}/{K2_INCLUDE_PREFIX}{{{{ dag_run.dag_id }}}}{K2_INCLUDE_SUFFIX} "
                         "--aws_volumes /opt/conda:/mnt/conda,/mnt/nextflow_shared_data:/mnt/nextflow_shared_data:ro"
                     ),
                 },
@@ -168,9 +378,19 @@ def bactopia_and_kraken2_v3_2_0():
         },
     )
 
-    # TODO: add report generation here
+    # TODO: add report generation here. couple of phases:
+    # - we need to write the report as we do now. we currently use a lambda at
+    #   an api endpoint that returns it for immediate download. may want to
+    #   consider doing that differently or augmenting what we currently do,
+    #   because...
+    # - if we generate here (or anywhere prior to a user hitting an endpoint to
+    #   download) we will need a place to store the report (s3). this brings a
+    #   whole lot of authz stuff to the equation. and right now we aren't
+    #   passing the authn headers anywhere, so we don't know who we're writing
+    #   the report for.
 
     chain(
+        configs,
         submit_bactopia_job,
         create_k2_include,
         wait_for_k2_include,

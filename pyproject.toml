@@ -12,6 +12,7 @@ python = ">=3.10,<3.13"
 boto3 = "*"
 apache-airflow = { version = "3.0.6", extras = ["amazon"] }
 # TODO: Add capepy when needed for imports
+pyright = "^1.1.410"
 
 [build-system]
 requires = ["poetry-core"]
