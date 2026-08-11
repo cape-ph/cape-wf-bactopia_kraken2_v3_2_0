@@ -2,6 +2,8 @@
 
 ## 2026-08-11
 
+- **observe**: {"relevance":"high","slug":"obs-2026-08-11-dag-report-generation-implemented-crawl-then-probe-loop-getc","title":"DAG report generation implemented (crawl-then-probe loop + getcannedreport html bytes caveat)"}
+- **observe**: {"relevance":"high","slug":"obs-2026-08-11-cape-cod-report-generation-architecture-getcannedreport-lamb","title":"cape-cod report generation architecture (getcannedreport lambda, seqauto ETL/crawler/Athena chain)"}
 - **observe**: {"relevance":"high","slug":"obs-2026-08-11-dag-config-format-reworked-to-dag-run-conf-pipelineconfigs-p","title":"DAG config format reworked to dag_run.conf/pipelineConfigs (PR #11); wiki synced"}
 - **observe**: {"relevance":"high","slug":"obs-2026-08-11-three-repo-cape-workflow-deploy-topology-repo-cape-cod-env-c","title":"Three-repo CAPE workflow deploy topology (repo -> cape-cod-env -> cape-cod)"}
 - **ensure\_page**: {"page_type":"entity","path":"entities/cape-cod-env","title":"cape-cod-env"}
