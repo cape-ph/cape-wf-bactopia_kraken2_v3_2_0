@@ -43,3 +43,10 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# pi-llm-wiki: keep authored knowledge, drop generated + immutable layers
+.llm-wiki/meta/
+.llm-wiki/raw/
+.llm-wiki/outputs/
+.llm-wiki/.discoveries/
+.llm-wiki/wiki/.obsidian/
