@@ -1,5 +1,9 @@
 # Wiki Update Log
 
+## 2026-08-12
+
+- **observe**: {"relevance":"high","slug":"obs-2026-08-12-verified-getcannedreport-html-endpoint-returns-200-html-stri","title":"Verified getcannedreport html endpoint returns 200 + HTML string (cape-cod fix deployed)"}
+
 ## 2026-08-11
 
 - **observe**: {"relevance":"high","slug":"obs-2026-08-11-dag-report-generation-implemented-crawl-then-probe-loop-getc","title":"DAG report generation implemented (crawl-then-probe loop + getcannedreport html bytes caveat)"}

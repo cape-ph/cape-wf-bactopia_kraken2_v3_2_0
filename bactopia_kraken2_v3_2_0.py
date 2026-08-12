@@ -104,11 +104,12 @@ REPORT_LAMBDA_ARN = (
 )
 REPORT_ID = "bactopia-single-sample-analysis"
 
-# TODO: placeholder demo destination; finalize the location later. The report
-#       is written to
-#       s3://{REPORT_OUTPUT_BUCKET}/{REPORT_OUTPUT_PREFIX}/<sample>/{REPORT_OUTPUT_FILENAME}
-REPORT_OUTPUT_BUCKET = "cape-demo-files"
-REPORT_OUTPUT_PREFIX = "artifacts"
+# The report is written to the seqauto artifacts bucket at
+# s3://{REPORT_OUTPUT_BUCKET}/{REPORT_OUTPUT_PREFIX}/<sample>/{REPORT_OUTPUT_FILENAME}
+# TODO: bucket name is a Pulumi-generated physical name; source it from stack
+#       config/exports rather than hard coding it.
+REPORT_OUTPUT_BUCKET = "ccd-dlh-t-seqauto-artifacts-vbkt-s3-d2421eb"
+REPORT_OUTPUT_PREFIX = "reports"
 REPORT_OUTPUT_FILENAME = "bactopia.html"
 
 # Crawl-then-probe loop tuning.
