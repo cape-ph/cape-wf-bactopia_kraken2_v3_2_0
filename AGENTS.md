@@ -15,6 +15,7 @@ CAPE workflow for Bactopia v3.2.0 and Kraken2 taxonomic classification.
 ### Setup
 
 Install tools and dependencies:
+
 ```bash
 mise install          # Install Python, Poetry, pre-commit, opencode
 poetry install        # Install dependencies for type checking
@@ -24,6 +25,7 @@ pre-commit install    # Enable git hooks
 ## Quality checks
 
 Run locally before committing:
+
 ```bash
 # Format code
 black bactopia_kraken2_v3_2_0.py
@@ -43,6 +45,7 @@ Pre-commit hooks run these automatically on git commit.
 ### Pull request checks
 
 PRs trigger:
+
 - Pyright type checking (basic mode, ignores missing stubs)
 - Black formatting validation (80 char lines)
 - isort import sorting validation (Black-compatible profile)
@@ -91,6 +94,7 @@ Automated via release-please:
 ## Dependencies
 
 Listed in `pyproject.toml` only for CI type checking:
+
 - boto3 - AWS SDK
 - apache-airflow[amazon] - Airflow with AWS providers
 - Eventually: capepy - CAPE utilities
@@ -104,3 +108,23 @@ These are NOT bundled or distributed - workflow runs in pre-built CAPE environme
 - No pytest tests (integration tested in CAPE environment)
 - Related projects: cape-cod, capepy, cape-frontend
 - Part of cape-ph workflow collection (cape-wf-* pattern)
+
+## Project Wiki
+
+This project keeps durable knowledge in `.llm-wiki/` (an Obsidian-compatible LLM
+wiki). Treat it as the source of truth for decisions, architecture, and
+hard-won findings.
+
+- At task start, read relevant pages under `.llm-wiki/wiki/`.
+- At task end, record durable decisions and findings as pages under
+  `.llm-wiki/wiki/`: one page per thing, kebab-case filenames, cross-link with
+  `[[folder/page]]`, and cite sources.
+- Never edit `.llm-wiki/raw/**` (immutable captures) or `.llm-wiki/meta/**`
+  (generated index). `meta/` is gitignored and rebuilt locally.
+- Commit authored `.llm-wiki/wiki/**` changes (including new source pages from
+  `wiki_observe` / `wiki_retro`) in the same commit as the code they describe,
+  so the knowledge lands alongside the change. `meta/`, `raw/`, `outputs/`, and
+  `.discoveries/` are gitignored and stay out of commits.
+- With the `@zosmaai/pi-llm-wiki` extension, prefer its tools (`wiki_recall`,
+  `wiki_retro`, `wiki_ensure_page`); they maintain `meta/` automatically.
+  Without it, edit the markdown directly and leave `meta/` alone.

@@ -46,13 +46,17 @@ Requirements:
 See meta.json for supported pipeline IDs and README.md for detailed usage.
 """
 
+import json
 import logging
+import time
 from datetime import datetime
 
+import boto3
 from airflow.providers.amazon.aws.operators.batch import BatchOperator
 from airflow.providers.amazon.aws.operators.s3 import S3CreateObjectOperator
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from airflow.sdk import chain, dag, task
+from botocore.exceptions import ClientError
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +77,62 @@ KRAKEN2_VERSION = "v3.2.0"
 WORKFLOW_QUEUE_NAME = "ccd-pvsl-workflows-btch-jobq-e326d2f"
 NEXTFLOW_JOB_DEFINITION = "ccd-pvsl-nextflow-jobdef"
 JOB_QUEUE_NAME = "ccd-pvsl-analysis-btch-jobq-0a107a5"
+
+# Report generation configuration.
+#
+# After the bactopia/kraken2 Batch jobs finish, their results land in the
+# seqauto `result-raw` bucket and are transformed into `result-clean` by
+# asynchronous Glue ETL jobs, then catalogued by the result-clean Glue crawler
+# so Athena can query them. The report is produced by invoking the deployed
+# canned-report lambda (`getcannedreport`), which queries Athena for the sample
+# and renders the HTML template. We drive readiness with a crawl-then-probe
+# loop: crawl, invoke the report lambda, and if the sample's data is not yet
+# queryable (non-200), sleep and re-crawl, because newly ETL'd clean data only
+# becomes queryable after a crawl.
+#
+# The report data function reads the sample metadata from the seqauto
+# input-clean catalog (`input_meta`) and the bactopia results from the
+# result-clean catalog, so both crawlers must run and be caught up before the
+# report is queryable. We crawl input-clean and result-clean each attempt.
+#
+# TODO: these need to be provided and not hard coded (crawler names are
+#       Pulumi-generated physical names and will change if the crawlers are
+#       recreated; source them from the CrawlerAttrs DynamoDB table via the
+#       getbucketcrawler API or a stable name later).
+AWS_REGION = "us-east-2"
+# TODO: source from the CrawlerAttrs DynamoDB table / getbucketcrawler API
+#       rather than hard coding this Pulumi-generated physical name.
+INPUT_CLEAN_CRAWLER_NAME = (
+    "ccd-dlh-T-seqauto-input-clean-vbkt-crwl-gcrwl-be77632"
+)
+RESULT_CLEAN_CRAWLER_NAME = (
+    "ccd-dlh-T-seqauto-result-clean-vbkt-crwl-gcrwl-1ceb6f5"
+)
+# Crawlers to run/wait on each attempt. They run in parallel (started
+# together, then awaited together); order is irrelevant.
+SEQAUTO_CRAWLER_NAMES = (
+    INPUT_CLEAN_CRAWLER_NAME,
+    RESULT_CLEAN_CRAWLER_NAME,
+)
+REPORT_LAMBDA_ARN = (
+    "arn:aws:lambda:us-east-2:767397883306:function:"
+    "ccd-pvsl-capi-api-getcannedreport-lmbdfn-b295d26"
+)
+REPORT_ID = "bactopia-single-sample-analysis"
+
+# The report is written to the seqauto artifacts bucket at
+# s3://{REPORT_OUTPUT_BUCKET}/{REPORT_OUTPUT_PREFIX}/<sample>/{REPORT_OUTPUT_FILENAME}
+# TODO: bucket name is a Pulumi-generated physical name; source it from stack
+#       config/exports rather than hard coding it.
+REPORT_OUTPUT_BUCKET = "ccd-dlh-t-seqauto-artifacts-vbkt-s3-d2421eb"
+REPORT_OUTPUT_PREFIX = "reports"
+REPORT_OUTPUT_FILENAME = "bactopia.html"
+
+# Crawl-then-probe loop tuning.
+REPORT_MAX_ATTEMPTS = 30
+REPORT_ATTEMPT_SLEEP_SECONDS = 60
+CRAWLER_POLL_INTERVAL_SECONDS = 15
+CRAWLER_WAIT_TIMEOUT_SECONDS = 900
 
 # NOTE: This is setting up for future. Right now this DAG only supports
 #       bactopia 3.2.0 and kraken through bactopia 3.2.0. The ids for those
@@ -187,6 +247,214 @@ def extract_s3_bucket_name(s3_path: str) -> str:
         raise ValueError(f"Invalid S3 path (empty bucket name): {s3_path}")
 
     return bucket_name
+
+
+def start_crawler_if_idle(glue_client, crawler_name: str) -> None:
+    """
+    Start the named Glue crawler unless it is already running.
+
+    If the crawler is already running (for example the scheduled daily crawl or
+    a concurrent DAG run), the start is skipped and the in-flight run is left to
+    finish.
+
+    Args:
+        glue_client: A boto3 Glue client.
+        crawler_name: The physical name of the crawler to start.
+    """
+    try:
+        glue_client.start_crawler(Name=crawler_name)
+        log.info("Started Glue crawler '%s'", crawler_name)
+    except ClientError as err:
+        if err.response["Error"]["Code"] != "CrawlerRunningException":
+            raise
+        log.info(
+            "Glue crawler '%s' already running; will wait for it to finish",
+            crawler_name,
+        )
+
+
+def run_crawlers_and_wait(glue_client, crawler_names) -> None:
+    """
+    Start the given Glue crawlers concurrently and wait for all of them to
+    return to the READY state.
+
+    The crawlers are all started first, then polled together against a single
+    shared timeout, so they run in parallel rather than sequentially. Order is
+    irrelevant to the caller.
+
+    Args:
+        glue_client: A boto3 Glue client.
+        crawler_names: An iterable of crawler physical names to run.
+
+    Raises:
+        TimeoutError: If any crawler does not return to READY within
+                      CRAWLER_WAIT_TIMEOUT_SECONDS.
+    """
+    for crawler_name in crawler_names:
+        start_crawler_if_idle(glue_client, crawler_name)
+
+    deadline = time.monotonic() + CRAWLER_WAIT_TIMEOUT_SECONDS
+    # give the crawlers a moment to leave READY before we start polling so we
+    # don't observe the pre-start READY state and return immediately
+    time.sleep(CRAWLER_POLL_INTERVAL_SECONDS)
+    pending = list(crawler_names)
+    while pending:
+        still_running = []
+        for crawler_name in pending:
+            state = glue_client.get_crawler(Name=crawler_name)["Crawler"][
+                "State"
+            ]
+            if state == "READY":
+                log.info(
+                    "Glue crawler '%s' finished (state READY)", crawler_name
+                )
+            else:
+                still_running.append(crawler_name)
+
+        if not still_running:
+            return
+        if time.monotonic() > deadline:
+            raise TimeoutError(
+                f"Glue crawlers {still_running} did not finish within "
+                f"{CRAWLER_WAIT_TIMEOUT_SECONDS}s."
+            )
+        pending = still_running
+        time.sleep(CRAWLER_POLL_INTERVAL_SECONDS)
+
+
+def invoke_report_lambda(
+    lambda_client, sample_id: str
+) -> tuple[int, str | None]:
+    """
+    Invoke the canned-report lambda for a sample and return (status_code, body).
+
+    The report lambda returns HTTP 200 with the rendered HTML once the sample's
+    data is catalogued in Athena. While the (asynchronous) ETL has not yet
+    produced queryable data the data function raises and the handler returns a
+    non-200 status. A FunctionError (an unhandled lambda crash) is also treated
+    as not-ready.
+
+    Args:
+        lambda_client: A boto3 Lambda client.
+        sample_id: The bactopia `--sample` value to report on.
+
+    Returns:
+        A tuple of (status_code, body). body is the report HTML on success and
+        None otherwise.
+    """
+    event = {
+        "queryStringParameters": {
+            "reportId": REPORT_ID,
+            "sampleId": sample_id,
+            "format": "html",
+        }
+    }
+    response = lambda_client.invoke(
+        FunctionName=REPORT_LAMBDA_ARN,
+        InvocationType="RequestResponse",
+        Payload=json.dumps(event).encode("utf-8"),
+    )
+
+    if response.get("FunctionError"):
+        error_payload = response["Payload"].read().decode("utf-8")
+        log.warning("Report lambda returned FunctionError: %s", error_payload)
+        return 500, None
+
+    try:
+        payload = json.loads(response["Payload"].read())
+    except (ValueError, KeyError) as err:
+        log.warning("Could not parse report lambda response: %s", err)
+        return 500, None
+    status_code = payload.get("statusCode", 500)
+    if status_code != 200:
+        log.warning(
+            "Report lambda handler returned status %s: %s",
+            status_code,
+            payload.get("body"),
+        )
+        return status_code, None
+
+    return 200, payload.get("body")
+
+
+@task
+def generate_and_store_report(**context) -> str:
+    """
+    Generate the bactopia single-sample analysis report and store it in S3.
+
+    Runs a bounded crawl-then-probe loop: trigger the seqauto input-clean and
+    result-clean Glue crawlers, wait for them to finish, then invoke the
+    deployed canned-report lambda for the bactopia `--sample`. On a 200 the
+    returned HTML is written to
+    s3://{REPORT_OUTPUT_BUCKET}/{REPORT_OUTPUT_PREFIX}/{sample_id}/{REPORT_OUTPUT_FILENAME}.
+    Otherwise the sample is not yet queryable, so we sleep and re-crawl (newly
+    ETL'd clean data only becomes queryable after a crawl).
+
+    Args:
+        context: Airflow context (automatically passed by TaskFlow API). The
+                 sample id is read from the validated configs in XCom:
+                 configs['bactopia']['nextflowOptions']['--sample'].
+
+    Returns:
+        The S3 URI the report HTML was written to.
+
+    Raises:
+        RuntimeError: If the report is not ready within REPORT_MAX_ATTEMPTS.
+
+    TODO: crawler names, lambda ARN, and output location are hard coded and
+          must be parameterized (see module constants).
+    """
+    configs = context["ti"].xcom_pull(
+        task_ids="validate_and_extract_nextflow_configs"
+    )
+    sample_id = configs["bactopia"]["nextflowOptions"]["--sample"]
+
+    glue_client = boto3.client("glue", region_name=AWS_REGION)
+    lambda_client = boto3.client("lambda", region_name=AWS_REGION)
+    s3_client = boto3.client("s3", region_name=AWS_REGION)
+
+    report_html = None
+    for attempt in range(1, REPORT_MAX_ATTEMPTS + 1):
+        log.info(
+            "Report attempt %s/%s for sample '%s'",
+            attempt,
+            REPORT_MAX_ATTEMPTS,
+            sample_id,
+        )
+        run_crawlers_and_wait(glue_client, SEQAUTO_CRAWLER_NAMES)
+
+        status_code, body = invoke_report_lambda(lambda_client, sample_id)
+        if status_code == 200 and body:
+            log.info("Report ready for sample '%s'", sample_id)
+            report_html = body
+            break
+
+        if attempt < REPORT_MAX_ATTEMPTS:
+            log.info(
+                "Report not ready (status=%s) for sample '%s'; sleeping %ss "
+                "before re-crawl",
+                status_code,
+                sample_id,
+                REPORT_ATTEMPT_SLEEP_SECONDS,
+            )
+            time.sleep(REPORT_ATTEMPT_SLEEP_SECONDS)
+
+    if report_html is None:
+        raise RuntimeError(
+            f"Report for sample '{sample_id}' was not ready after "
+            f"{REPORT_MAX_ATTEMPTS} attempts."
+        )
+
+    s3_key = f"{REPORT_OUTPUT_PREFIX}/{sample_id}/{REPORT_OUTPUT_FILENAME}"
+    s3_client.put_object(
+        Bucket=REPORT_OUTPUT_BUCKET,
+        Key=s3_key,
+        Body=report_html.encode("utf-8"),
+        ContentType="text/html",
+    )
+    s3_uri = f"s3://{REPORT_OUTPUT_BUCKET}/{s3_key}"
+    log.info("Wrote report for sample '%s' to %s", sample_id, s3_uri)
+    return s3_uri
 
 
 # TODO: in order for this to be reusable, we'll need to pass in whatever form
@@ -378,16 +646,17 @@ def bactopia_and_kraken2_v3_2_0():
         },
     )
 
-    # TODO: add report generation here. couple of phases:
-    # - we need to write the report as we do now. we currently use a lambda at
-    #   an api endpoint that returns it for immediate download. may want to
-    #   consider doing that differently or augmenting what we currently do,
-    #   because...
-    # - if we generate here (or anywhere prior to a user hitting an endpoint to
-    #   download) we will need a place to store the report (s3). this brings a
-    #   whole lot of authz stuff to the equation. and right now we aren't
-    #   passing the authn headers anywhere, so we don't know who we're writing
-    #   the report for.
+    # Report generation. Once the kraken2 job finishes, the bactopia/kraken2
+    # results have been written to the seqauto result-raw bucket and are being
+    # transformed into result-clean by asynchronous Glue ETL jobs. This task
+    # runs a crawl-then-probe loop against the input-clean and result-clean
+    # crawlers and the canned-report lambda, then writes the rendered HTML to
+    # S3. See generate_and_store_report and the report constants for details.
+    #
+    # NOTE: this stores the report at a fixed S3 location and does not carry any
+    #       authn context; the download-time authz concerns of the existing API
+    #       endpoint are intentionally out of scope for this workflow step.
+    generate_report = generate_and_store_report()
 
     chain(
         configs,
@@ -395,6 +664,7 @@ def bactopia_and_kraken2_v3_2_0():
         create_k2_include,
         wait_for_k2_include,
         submit_kraken2_job,
+        generate_report,
     )
 
 

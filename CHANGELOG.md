@@ -6,7 +6,7 @@
 ### Bug Fixes
 
 * 9 modify the configuration format for the dag ([c02762d](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/c02762d86a65f9dcc4f6b1df0180e0bbf0c67ae0))
-* wired up for new config format. refactored to (hopefully) make extraction of common DAG code into a lirary down the road ([3279dcc](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/3279dccc0bf8ad02078240aa678c2e1e63cbaf68))
+* wired up for new config format. refactored to (hopefully) make extraction of common DAG code into a library down the road ([3279dcc](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/3279dccc0bf8ad02078240aa678c2e1e63cbaf68))
 
 ## [0.1.3](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.1.2...v0.1.3) (2026-06-04)
 
