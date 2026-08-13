@@ -1,5 +1,9 @@
 # Wiki Update Log
 
+## 2026-08-13
+
+- **observe**: {"relevance":"high","slug":"obs-2026-08-13-report-readiness-needs-both-input-clean-and-result-clean-cra","title":"Report readiness needs both input-clean and result-clean crawlers (input_meta + results)"}
+
 ## 2026-08-12
 
 - **observe**: {"relevance":"high","slug":"obs-2026-08-12-verified-getcannedreport-html-endpoint-returns-200-html-stri","title":"Verified getcannedreport html endpoint returns 200 + HTML string (cape-cod fix deployed)"}

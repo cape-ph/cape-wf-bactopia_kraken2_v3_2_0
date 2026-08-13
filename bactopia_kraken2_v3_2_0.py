@@ -90,13 +90,29 @@ JOB_QUEUE_NAME = "ccd-pvsl-analysis-btch-jobq-0a107a5"
 # queryable (non-200), sleep and re-crawl, because newly ETL'd clean data only
 # becomes queryable after a crawl.
 #
-# TODO: these need to be provided and not hard coded (crawler name is a
-#       Pulumi-generated physical name and will change if the crawler is
-#       recreated; source it from the CrawlerAttrs DynamoDB table or a stable
-#       name later).
+# The report data function reads the sample metadata from the seqauto
+# input-clean catalog (`input_meta`) and the bactopia results from the
+# result-clean catalog, so both crawlers must run and be caught up before the
+# report is queryable. We crawl input-clean and result-clean each attempt.
+#
+# TODO: these need to be provided and not hard coded (crawler names are
+#       Pulumi-generated physical names and will change if the crawlers are
+#       recreated; source them from the CrawlerAttrs DynamoDB table via the
+#       getbucketcrawler API or a stable name later).
 AWS_REGION = "us-east-2"
+# TODO: source from the CrawlerAttrs DynamoDB table / getbucketcrawler API
+#       rather than hard coding this Pulumi-generated physical name.
+INPUT_CLEAN_CRAWLER_NAME = (
+    "ccd-dlh-T-seqauto-input-clean-vbkt-crwl-gcrwl-be77632"
+)
 RESULT_CLEAN_CRAWLER_NAME = (
     "ccd-dlh-T-seqauto-result-clean-vbkt-crwl-gcrwl-1ceb6f5"
+)
+# Crawlers to run/wait on each attempt, in order. input-clean first so sample
+# metadata is catalogued before the result tables that reference it.
+SEQAUTO_CRAWLER_NAMES = (
+    INPUT_CLEAN_CRAWLER_NAME,
+    RESULT_CLEAN_CRAWLER_NAME,
 )
 REPORT_LAMBDA_ARN = (
     "arn:aws:lambda:us-east-2:767397883306:function:"
@@ -337,9 +353,10 @@ def generate_and_store_report(**context) -> str:
     """
     Generate the bactopia single-sample analysis report and store it in S3.
 
-    Runs a bounded crawl-then-probe loop: trigger the seqauto result-clean Glue
-    crawler, wait for it to finish, then invoke the deployed canned-report
-    lambda for the bactopia `--sample`. On a 200 the returned HTML is written to
+    Runs a bounded crawl-then-probe loop: trigger the seqauto input-clean and
+    result-clean Glue crawlers, wait for them to finish, then invoke the
+    deployed canned-report lambda for the bactopia `--sample`. On a 200 the
+    returned HTML is written to
     s3://{REPORT_OUTPUT_BUCKET}/{REPORT_OUTPUT_PREFIX}/{sample_id}/{REPORT_OUTPUT_FILENAME}.
     Otherwise the sample is not yet queryable, so we sleep and re-crawl (newly
     ETL'd clean data only becomes queryable after a crawl).
@@ -355,8 +372,8 @@ def generate_and_store_report(**context) -> str:
     Raises:
         RuntimeError: If the report is not ready within REPORT_MAX_ATTEMPTS.
 
-    TODO: crawler name, lambda ARN, and output location are hard coded for the
-          demo and must be parameterized (see module constants).
+    TODO: crawler names, lambda ARN, and output location are hard coded and
+          must be parameterized (see module constants).
     """
     configs = context["ti"].xcom_pull(
         task_ids="validate_and_extract_nextflow_configs"
@@ -375,7 +392,8 @@ def generate_and_store_report(**context) -> str:
             REPORT_MAX_ATTEMPTS,
             sample_id,
         )
-        run_crawler_and_wait(glue_client, RESULT_CLEAN_CRAWLER_NAME)
+        for crawler_name in SEQAUTO_CRAWLER_NAMES:
+            run_crawler_and_wait(glue_client, crawler_name)
 
         status_code, body = invoke_report_lambda(lambda_client, sample_id)
         if status_code == 200 and body:
@@ -603,9 +621,9 @@ def bactopia_and_kraken2_v3_2_0():
     # Report generation. Once the kraken2 job finishes, the bactopia/kraken2
     # results have been written to the seqauto result-raw bucket and are being
     # transformed into result-clean by asynchronous Glue ETL jobs. This task
-    # runs a crawl-then-probe loop against the result-clean crawler and the
-    # canned-report lambda, then writes the rendered HTML to S3. See
-    # generate_and_store_report and the report constants for details.
+    # runs a crawl-then-probe loop against the input-clean and result-clean
+    # crawlers and the canned-report lambda, then writes the rendered HTML to
+    # S3. See generate_and_store_report and the report constants for details.
     #
     # NOTE: this stores the report at a fixed S3 location and does not carry any
     #       authn context; the download-time authz concerns of the existing API
