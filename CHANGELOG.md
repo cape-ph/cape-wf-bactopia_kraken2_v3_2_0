@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.0](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.1.4...v0.2.0) (2026-08-13)
+
+
+### Features
+
+* add report generation ([e4e3ef8](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/e4e3ef836862d67789ed452f785616a572e171c7))
+* initial pass at report generation in the bactopia workflow ([c1b3a03](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/c1b3a034c5ee58999451ca22e4b181bbf7a1beb5))
+* **report:** store reports in the seqauto artifacts bucket ([d41929f](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/d41929f27ebca3086f7fd79137b904b5622301b6))
+
+
+### Bug Fixes
+
+* **report:** also run and wait for the seqauto input-clean crawler ([5a3a38e](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/5a3a38ec738700cf324d1f9e57b81dad485a5b3a))
+
+
+### Documentation
+
+* fix typo ([86eb925](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/86eb925686b67a69365373eefbc152d872ad701a))
+* sync README to dag_run.conf config format and add project wiki ([5e7cf21](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/5e7cf219ec5c9aebd7c7f0cf3f44a8561f4e27a7))
+
 ## [0.1.4](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.1.3...v0.1.4) (2026-08-11)
 
 
