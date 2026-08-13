@@ -108,8 +108,8 @@ INPUT_CLEAN_CRAWLER_NAME = (
 RESULT_CLEAN_CRAWLER_NAME = (
     "ccd-dlh-T-seqauto-result-clean-vbkt-crwl-gcrwl-1ceb6f5"
 )
-# Crawlers to run/wait on each attempt, in order. input-clean first so sample
-# metadata is catalogued before the result tables that reference it.
+# Crawlers to run/wait on each attempt. They run in parallel (started
+# together, then awaited together); order is irrelevant.
 SEQAUTO_CRAWLER_NAMES = (
     INPUT_CLEAN_CRAWLER_NAME,
     RESULT_CLEAN_CRAWLER_NAME,
@@ -249,21 +249,17 @@ def extract_s3_bucket_name(s3_path: str) -> str:
     return bucket_name
 
 
-def run_crawler_and_wait(glue_client, crawler_name: str) -> None:
+def start_crawler_if_idle(glue_client, crawler_name: str) -> None:
     """
-    Start the named Glue crawler (if not already running) and wait for it to
-    return to the READY state.
+    Start the named Glue crawler unless it is already running.
 
-    If the crawler is already running (for example the scheduled daily crawl),
-    we skip starting it and just wait for the in-flight run to finish.
+    If the crawler is already running (for example the scheduled daily crawl or
+    a concurrent DAG run), the start is skipped and the in-flight run is left to
+    finish.
 
     Args:
         glue_client: A boto3 Glue client.
-        crawler_name: The physical name of the crawler to run.
-
-    Raises:
-        TimeoutError: If the crawler does not return to READY within
-                      CRAWLER_WAIT_TIMEOUT_SECONDS.
+        crawler_name: The physical name of the crawler to start.
     """
     try:
         glue_client.start_crawler(Name=crawler_name)
@@ -272,24 +268,57 @@ def run_crawler_and_wait(glue_client, crawler_name: str) -> None:
         if err.response["Error"]["Code"] != "CrawlerRunningException":
             raise
         log.info(
-            "Glue crawler '%s' already running; waiting for it to finish",
+            "Glue crawler '%s' already running; will wait for it to finish",
             crawler_name,
         )
 
+
+def run_crawlers_and_wait(glue_client, crawler_names) -> None:
+    """
+    Start the given Glue crawlers concurrently and wait for all of them to
+    return to the READY state.
+
+    The crawlers are all started first, then polled together against a single
+    shared timeout, so they run in parallel rather than sequentially. Order is
+    irrelevant to the caller.
+
+    Args:
+        glue_client: A boto3 Glue client.
+        crawler_names: An iterable of crawler physical names to run.
+
+    Raises:
+        TimeoutError: If any crawler does not return to READY within
+                      CRAWLER_WAIT_TIMEOUT_SECONDS.
+    """
+    for crawler_name in crawler_names:
+        start_crawler_if_idle(glue_client, crawler_name)
+
     deadline = time.monotonic() + CRAWLER_WAIT_TIMEOUT_SECONDS
-    # give the crawler a moment to leave READY before we start polling so we
+    # give the crawlers a moment to leave READY before we start polling so we
     # don't observe the pre-start READY state and return immediately
     time.sleep(CRAWLER_POLL_INTERVAL_SECONDS)
-    while True:
-        state = glue_client.get_crawler(Name=crawler_name)["Crawler"]["State"]
-        if state == "READY":
-            log.info("Glue crawler '%s' finished (state READY)", crawler_name)
+    pending = list(crawler_names)
+    while pending:
+        still_running = []
+        for crawler_name in pending:
+            state = glue_client.get_crawler(Name=crawler_name)["Crawler"][
+                "State"
+            ]
+            if state == "READY":
+                log.info(
+                    "Glue crawler '%s' finished (state READY)", crawler_name
+                )
+            else:
+                still_running.append(crawler_name)
+
+        if not still_running:
             return
         if time.monotonic() > deadline:
             raise TimeoutError(
-                f"Glue crawler '{crawler_name}' did not finish within "
-                f"{CRAWLER_WAIT_TIMEOUT_SECONDS}s (last state {state})."
+                f"Glue crawlers {still_running} did not finish within "
+                f"{CRAWLER_WAIT_TIMEOUT_SECONDS}s."
             )
+        pending = still_running
         time.sleep(CRAWLER_POLL_INTERVAL_SECONDS)
 
 
@@ -392,8 +421,7 @@ def generate_and_store_report(**context) -> str:
             REPORT_MAX_ATTEMPTS,
             sample_id,
         )
-        for crawler_name in SEQAUTO_CRAWLER_NAMES:
-            run_crawler_and_wait(glue_client, crawler_name)
+        run_crawlers_and_wait(glue_client, SEQAUTO_CRAWLER_NAMES)
 
         status_code, body = invoke_report_lambda(lambda_client, sample_id)
         if status_code == 200 and body:
