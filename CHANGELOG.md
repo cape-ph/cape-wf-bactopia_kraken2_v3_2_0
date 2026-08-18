@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.2.0...v0.3.0) (2026-08-18)
+
+
+### Features
+
+* run kraken2 in parallel and store report ([a5b7cb5](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/a5b7cb5cf09f1f427565a8da55f848bf15183f1d))
+* run kraken2 in parallel and store report ([54c7650](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/54c76509d2320b5320996bed974101ce0d9d61ad))
+
 ## [0.2.0](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.1.4...v0.2.0) (2026-08-13)
 
 

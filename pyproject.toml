@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cape-wf-bactopia-kraken2"
-version = "0.2.0"
+version = "0.3.0"
 description = "CAPE workflow for Bactopia v3.2.0 and Kraken2 taxonomic classification"
 authors = []
 readme = "README.md"
