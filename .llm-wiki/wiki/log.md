@@ -1,5 +1,14 @@
 # Wiki Update Log
 
+## 2026-08-18
+
+- **observe**: {"relevance":"high","slug":"obs-2026-08-18-kraken2-html-report-inlined-direct-from-s3-in-bactopia-krake","title":"Kraken2 HTML report inlined direct-from-S3 in bactopia+kraken2 DAG"}
+
+## 2026-08-17
+
+- **observe**: {"relevance":"high","slug":"obs-2026-08-17-kraken2-profile-report-scaffolded-disabled-in-bactopia-krake","title":"kraken2 profile report scaffolded (disabled) in bactopia+kraken2 DAG"}
+- **observe**: {"relevance":"high","slug":"obs-2026-08-17-bactopia-kraken2-dag-parallelized-via-qc-output-s3-gate","title":"bactopia+kraken2 DAG parallelized via QC-output S3 gate"}
+
 ## 2026-08-13
 
 - **observe**: {"relevance":"high","slug":"obs-2026-08-13-report-readiness-needs-both-input-clean-and-result-clean-cra","title":"Report readiness needs both input-clean and result-clean crawlers (input_meta + results)"}
