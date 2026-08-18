@@ -11,7 +11,18 @@ Airflow workflow that runs:
 1. **Bactopia v3.2.0** - Genome assembly and analysis
 2. **Kraken2 via Bactopia tools** - Taxonomic classification
 
-Both steps run in AWS Batch as Nextflow pipelines.
+Both steps run in AWS Batch as Nextflow pipelines. Bactopia is submitted
+without blocking, and Kraken2 starts as soon as bactopia's per-sample QC output
+(`<outdir>/<sample>/main/qc/<sample>.fastq.gz`) is available, so
+the two pipelines run in parallel. Report generation waits for both the Kraken2
+job and the full bactopia run to finish.
+
+When the Kraken2 job finishes, a self-contained HTML taxonomic report is built
+directly from its report file
+(`<outdir>/<sample>/tools/kraken2/<sample>.kraken2.report.txt`) and written to
+the seqauto artifacts bucket alongside the bactopia report
+(`reports/<sample>/kraken2.html`). If that file is missing or empty (no
+classifications), the step is skipped and the run stays green.
 
 ## Pipeline Details
 
