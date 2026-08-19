@@ -16,8 +16,12 @@ Architecture:
       <outdir>/<sample>/main/qc/<sample>.fastq.gz the Kraken2
       BatchOperator runs while the rest of bactopia is still executing
     - S3 operators create and wait for the kraken2 include file
-    - A BatchSensor waits for the bactopia job to finish before report
-      generation, which needs the full bactopia results
+    - A BatchSensor waits for the bactopia job to finish, then the bactopia
+      report is generated from the full bactopia results
+    - The bactopia and kraken2 report branches are independent: each report is
+      generated as soon as its own inputs are ready, and a failure in one
+      branch does not block the other (the DAG has no fail-fast). The run is
+      done once both reports are generated or a branch has failed
     - After kraken2 finishes, a self-contained HTML taxonomic report is built
       directly from the kraken2 tool report file and written to the artifacts
       bucket (see generate_and_store_kraken2_report); it fails silently if the
@@ -1341,12 +1345,13 @@ def bactopia_and_kraken2_v3_2_0():
         },
     )
 
-    # Report generation. Once the kraken2 job finishes, the bactopia/kraken2
-    # results have been written to the seqauto result-raw bucket and are being
-    # transformed into result-clean by asynchronous Glue ETL jobs. This task
-    # runs a crawl-then-probe loop against the input-clean and result-clean
-    # crawlers and the canned-report lambda, then writes the rendered HTML to
-    # S3. See generate_and_store_report and the report constants for details.
+    # Bactopia report generation. Once bactopia finishes, its results have been
+    # written to the seqauto result-raw bucket and are being transformed into
+    # result-clean by asynchronous Glue ETL jobs. This task runs a
+    # crawl-then-probe loop against the input-clean and result-clean crawlers
+    # and the canned-report lambda, then writes the rendered HTML to S3. It
+    # depends only on the bactopia branch, so a kraken2 failure does not block
+    # it. See generate_and_store_report and the report constants for details.
     #
     # NOTE: this stores the report at a fixed S3 location and does not carry any
     #       authn context; the download-time authz concerns of the existing API
@@ -1364,13 +1369,17 @@ def bactopia_and_kraken2_v3_2_0():
 
     # Dependency graph. bactopia and kraken2 run in parallel: kraken2 starts as
     # soon as the QC output and include file are ready, while bactopia keeps
-    # running. The report waits for both kraken2 and the full bactopia job.
+    # running. The two report branches are independent - the bactopia report
+    # waits only for the full bactopia job, and the kraken2 report waits only
+    # for the kraken2 job - so a failure in one branch does not block the
+    # other.
     #
     #   configs -> submit_bactopia_job -> wait_for_bactopia_qc_output
     #                                  -> wait_for_bactopia_complete
     #   configs -> create_k2_include   -> wait_for_kraken_2_include_file
     #   [qc_output, k2_include]        -> submit_kraken2_job
-    #   [submit_kraken2_job, wait_for_bactopia_complete] -> generate_report
+    #   wait_for_bactopia_complete     -> generate_report
+    #   submit_kraken2_job             -> generate_kraken2_report
     chain(
         configs,
         submit_bactopia_job,
@@ -1378,12 +1387,12 @@ def bactopia_and_kraken2_v3_2_0():
     )
     chain(configs, create_k2_include, wait_for_k2_include)
     chain([wait_for_qc_output, wait_for_k2_include], submit_kraken2_job)
-    chain([submit_kraken2_job, wait_for_bactopia_complete], generate_report)
+    chain(wait_for_bactopia_complete, generate_report)
 
     # After kraken2 finishes (submit_kraken2_job waits for completion), build
     # the taxonomic report directly from the kraken2 tool report file and push
     # it to S3 alongside the bactopia report. It depends only on
-    # submit_kraken2_job, so it runs in parallel with the bactopia report, and
+    # submit_kraken2_job, so it runs independently of the bactopia report and
     # fails silently if the report file is missing or empty.
     generate_kraken2_report = generate_and_store_kraken2_report()
     chain(submit_kraken2_job, generate_kraken2_report)
