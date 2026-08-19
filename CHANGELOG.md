@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.3.0...v0.3.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* allow kraken2 and bactopia to finish independently ([365cb2a](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/365cb2a464fb5430ddfb51323fa865db6426f9e7))
+* allow kraken2 and bactopia to finish independently ([fd7b6f4](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/commit/fd7b6f4dcd1618c7ad980b188df63ee10db2a7a4))
+
 ## [0.3.0](https://github.com/cape-ph/cape-wf-bactopia_kraken2_v3_2_0/compare/v0.2.0...v0.3.0) (2026-08-18)
 
 
